@@ -19,7 +19,7 @@ jobs:
         include:
           - os: ubuntu-22.04
             artifact: mpf-sdk-linux-x64
-            arch: gcc_64
+            arch: linux_gcc_64
           - os: windows-latest
             artifact: mpf-sdk-windows-x64
             arch: win64_mingw
