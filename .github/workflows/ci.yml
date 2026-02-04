@@ -31,8 +31,14 @@ jobs:
           version: ${{ env.QT_VERSION }}
           cache: true
 
-      - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=./install
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/install"
 
       - name: Build
         run: cmake --build build
@@ -47,7 +53,9 @@ jobs:
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: cd install; 7z a -tzip ../${{ matrix.artifact }}.zip .
+        run: |
+          Set-Location install
+          7z a -tzip ../${{ matrix.artifact }}.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
