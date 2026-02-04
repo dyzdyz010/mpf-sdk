@@ -6,6 +6,7 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   QT_VERSION: '6.8.3'
@@ -13,12 +14,15 @@ env:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-22.04
             artifact: mpf-sdk-linux-x64
+            arch: gcc_64
           - os: windows-latest
             artifact: mpf-sdk-windows-x64
+            arch: mingw_64
 
     runs-on: ${{ matrix.os }}
 
@@ -29,7 +33,18 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
+          arch: ${{ matrix.arch }}
           cache: true
+          tools: 'tools_mingw1310'
+
+      - name: Setup MinGW (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "$IQTA_TOOLS/mingw1310_64/bin" >> $GITHUB_PATH
+
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev
 
       - name: Configure (Linux)
         if: runner.os == 'Linux'
@@ -37,13 +52,15 @@ jobs:
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/install"
+        shell: bash
+        run: cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/install"
 
       - name: Build
+        shell: bash
         run: cmake --build build
 
       - name: Install
+        shell: bash
         run: cmake --install build
 
       - name: Package (Linux)
@@ -52,10 +69,8 @@ jobs:
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Set-Location install
-          7z a -tzip ../${{ matrix.artifact }}.zip .
+        shell: bash
+        run: cd install && 7z a -tzip ../${{ matrix.artifact }}.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -82,3 +97,15 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+
+      # Trigger downstream repos after SDK release
+      - name: Trigger downstream builds
+        if: success()
+        run: |
+          for repo in mpf-http-client mpf-ui-components; do
+            curl -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.DISPATCH_TOKEN }}" \
+              https://api.github.com/repos/dyzdyz010/$repo/dispatches \
+              -d '{"event_type":"sdk-released","client_payload":{"version":"${{ github.ref_name }}"}}'
+          done
