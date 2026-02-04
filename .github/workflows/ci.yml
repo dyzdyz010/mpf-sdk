@@ -31,35 +31,33 @@ jobs:
           version: ${{ env.QT_VERSION }}
           cache: true
 
-      - name: Configure
-        shell: bash
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/install"
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$env:GITHUB_WORKSPACE/install
 
       - name: Build
-        shell: bash
         run: cmake --build build
 
       - name: Install
-        shell: bash
         run: cmake --install build
 
-      - name: Package
-        shell: bash
-        run: |
-          cd ${{ github.workspace }}/install
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            7z a -tzip ../${{ matrix.artifact }}.zip .
-          else
-            tar -czvf ../${{ matrix.artifact }}.tar.gz .
-          fi
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: cd install && tar -czvf ../${{ matrix.artifact }}.tar.gz .
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: cd install && 7z a -tzip ../${{ matrix.artifact }}.zip .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: |
-            ${{ matrix.artifact }}.zip
-            ${{ matrix.artifact }}.tar.gz
+          path: ${{ matrix.artifact }}.*
 
   release:
     needs: build
@@ -75,14 +73,8 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: List artifacts
-        run: find artifacts -type f || ls -la
-
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            artifacts/*
-            *.zip
-            *.tar.gz
+          files: artifacts/*
           generate_release_notes: true
