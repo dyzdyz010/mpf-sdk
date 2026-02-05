@@ -6,10 +6,14 @@
 namespace mpf {
 
 /**
- * @brief Navigation/Router interface (pure abstract)
+ * @brief Navigation interface for Loader-based page switching
  * 
- * Provides navigation capabilities for UI modules.
- * Implementation provides Qt signals via a separate QObject.
+ * Simple navigation model:
+ * - Plugins register their main page URL via registerRoute()
+ * - Host uses getPageUrl() to load pages via QML Loader
+ * - Internal navigation within plugins uses Popup/Dialog
+ * 
+ * This avoids cross-DLL QML component dynamic loading issues.
  */
 class INavigation
 {
@@ -17,46 +21,31 @@ public:
     virtual ~INavigation() = default;
 
     /**
-     * @brief Push a new page onto the navigation stack
+     * @brief Register a route with its QML page URL
+     * @param route Route name (e.g., "orders", "settings")
+     * @param qmlPageUrl Full URL to the QML page file
      */
-    virtual bool push(const QString& route, const QVariantMap& params = {}) = 0;
+    virtual void registerRoute(const QString& route, const QString& qmlPageUrl) = 0;
 
     /**
-     * @brief Pop the current page from the stack
+     * @brief Get the QML page URL for a route
+     * @param route Route name
+     * @return QML page URL, or empty string if not found
      */
-    virtual bool pop() = 0;
+    virtual QString getPageUrl(const QString& route) const = 0;
 
     /**
-     * @brief Pop to the root of the navigation stack
-     */
-    virtual void popToRoot() = 0;
-
-    /**
-     * @brief Replace the current page
-     */
-    virtual bool replace(const QString& route, const QVariantMap& params = {}) = 0;
-
-    /**
-     * @brief Get current route
+     * @brief Get current active route
      */
     virtual QString currentRoute() const = 0;
 
     /**
-     * @brief Get navigation stack depth
+     * @brief Set current active route (called by host when page changes)
      */
-    virtual int stackDepth() const = 0;
+    virtual void setCurrentRoute(const QString& route) = 0;
 
-    /**
-     * @brief Check if can go back
-     */
-    virtual bool canGoBack() const = 0;
-
-    /**
-     * @brief Register a route handler
-     */
-    virtual void registerRoute(const QString& route, const QString& qmlComponent) = 0;
-
-    static constexpr int apiVersion() { return 2; }
+    // API version 3: simplified Loader-based navigation
+    static constexpr int apiVersion() { return 3; }
 };
 
 } // namespace mpf
