@@ -44,7 +44,6 @@ jobs:
         shell: bash
         run: echo "$IQTA_TOOLS/mingw1310_64/bin" >> $GITHUB_PATH
 
-
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev
@@ -101,14 +100,24 @@ jobs:
           files: artifacts/*
           generate_release_notes: true
 
-      # Trigger downstream repos after SDK release
+  # Cascade: SDK -> http-client, ui-components, plugin-rules
+  trigger-downstream:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
       - name: Trigger downstream builds
-        if: success()
         run: |
-          for repo in mpf-http-client mpf-ui-components; do
-            curl -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${{ secrets.DISPATCH_TOKEN }}" \
-              https://api.github.com/repos/dyzdyz010/$repo/dispatches \
-              -d '{"event_type":"sdk-released","client_payload":{"version":"${{ github.ref_name }}"}}'
-          done
+          VERSION="${GITHUB_REF_NAME}"
+          echo "Triggering downstream builds with SDK version: $VERSION"
+          
+          # Trigger http-client
+          gh workflow run ci.yml -R dyzdyz010/mpf-http-client -f sdk_version=$VERSION
+          
+          # Trigger ui-components
+          gh workflow run ci.yml -R dyzdyz010/mpf-ui-components -f sdk_version=$VERSION
+          
+          # Trigger plugin-rules (only depends on SDK)
+          gh workflow run ci.yml -R dyzdyz010/mpf-plugin-rules -f sdk_version=$VERSION
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
