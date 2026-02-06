@@ -11,3 +11,6 @@ compile_commands.json
 .cache/
 .vscode/
 .idea/
+
+# User-specific CMake presets
+CMakeUserPresets.json
