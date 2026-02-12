@@ -3,6 +3,8 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
+#include <functional>
+#include <optional>
 
 namespace mpf {
 
@@ -15,7 +17,6 @@ struct Event
     QString senderId;           ///< Plugin ID of sender
     QVariantMap data;           ///< Event payload
     qint64 timestamp = 0;       ///< Unix timestamp in milliseconds
-    QString correlationId;      ///< Optional: for request/response patterns
 
     QVariantMap toVariantMap() const
     {
@@ -23,8 +24,7 @@ struct Event
             {"topic", topic},
             {"senderId", senderId},
             {"data", data},
-            {"timestamp", timestamp},
-            {"correlationId", correlationId}
+            {"timestamp", timestamp}
         };
     }
 
@@ -35,7 +35,6 @@ struct Event
         e.senderId = map.value("senderId").toString();
         e.data = map.value("data").toMap();
         e.timestamp = map.value("timestamp").toLongLong();
-        e.correlationId = map.value("correlationId").toString();
         return e;
     }
 };
@@ -48,15 +47,6 @@ struct SubscriptionOptions
     bool async = true;              ///< Async delivery (default) vs synchronous
     int priority = 0;               ///< Higher priority = called first
     bool receiveOwnEvents = false;  ///< Receive events from same sender
-
-    QVariantMap toVariantMap() const
-    {
-        return {
-            {"async", async},
-            {"priority", priority},
-            {"receiveOwnEvents", receiveOwnEvents}
-        };
-    }
 };
 
 /**
@@ -66,8 +56,8 @@ struct TopicStats
 {
     QString topic;
     int subscriberCount = 0;
-    qint64 eventCount = 0;      ///< Total events published
-    qint64 lastEventTime = 0;   ///< Last event timestamp
+    qint64 eventCount = 0;
+    qint64 lastEventTime = 0;
 
     QVariantMap toVariantMap() const
     {
@@ -81,25 +71,30 @@ struct TopicStats
 };
 
 /**
- * @brief Event bus interface for publish/subscribe messaging
+ * @brief Event bus for inter-plugin communication
  *
- * Provides loose-coupled communication between plugins.
- * Supports wildcard topic matching:
- *   - "*" matches a single level (e.g., "orders/*" matches "orders/created")
- *   - "**" matches multiple levels (e.g., "orders/**" matches "orders/items/added")
+ * Three communication patterns:
+ *   1. Publish/Subscribe — fire-and-forget broadcast (one-to-many)
+ *   2. Request/Response  — synchronous call with return value (one-to-one)
+ *   3. Wildcard matching  — "*" single level, "**" multi-level
+ *
+ * All subscribe calls require a callback. No signal-based subscriptions.
  */
 class IEventBus
 {
 public:
     virtual ~IEventBus() = default;
 
-    // ===== Publishing =====
+    /// Callback for pub/sub event handlers
+    using EventHandler = std::function<void(const Event&)>;
+
+    /// Callback for request handlers that return a response
+    using RequestHandler = std::function<QVariantMap(const Event&)>;
+
+    // ===== Publish/Subscribe =====
 
     /**
-     * @brief Publish an event to a topic (async delivery)
-     * @param topic Topic name (e.g., "orders/created")
-     * @param data Event payload
-     * @param senderId Publisher plugin ID
+     * @brief Publish an event (async delivery to subscribers)
      * @return Number of subscribers notified
      */
     virtual int publish(const QString& topic,
@@ -107,83 +102,79 @@ public:
                         const QString& senderId = {}) = 0;
 
     /**
-     * @brief Publish an event synchronously (blocks until all handlers complete)
-     * @param topic Topic name
-     * @param data Event payload
-     * @param senderId Publisher plugin ID
+     * @brief Publish synchronously (blocks until all handlers complete)
      * @return Number of subscribers notified
      */
     virtual int publishSync(const QString& topic,
                             const QVariantMap& data,
                             const QString& senderId = {}) = 0;
 
-    // ===== Subscribing =====
-
     /**
-     * @brief Subscribe to a topic pattern
-     * @param pattern Topic pattern (supports wildcards: "*" single level, "**" multi-level)
-     * @param subscriberId Subscriber plugin ID
-     * @param options Subscription options
-     * @return Subscription ID (used for unsubscribe)
+     * @brief Subscribe to a topic pattern with a callback
+     * @param pattern Topic pattern (supports wildcards)
+     * @param subscriberId Plugin ID
+     * @param handler Callback invoked for matching events
+     * @param options Delivery options
+     * @return Subscription ID (for unsubscribe)
      */
     virtual QString subscribe(const QString& pattern,
                               const QString& subscriberId,
+                              EventHandler handler,
                               const SubscriptionOptions& options = {}) = 0;
 
     /**
-     * @brief Unsubscribe by subscription ID
-     * @param subscriptionId ID returned from subscribe()
-     * @return true if subscription was found and removed
+     * @brief Unsubscribe by ID
      */
     virtual bool unsubscribe(const QString& subscriptionId) = 0;
 
     /**
      * @brief Unsubscribe all subscriptions for a plugin
-     * @param subscriberId Plugin ID to unsubscribe
      */
     virtual void unsubscribeAll(const QString& subscriberId) = 0;
 
-    // ===== Query Methods =====
+    // ===== Request/Response =====
 
     /**
-     * @brief Get subscriber count for a topic (counts matching patterns)
-     * @param topic Exact topic name
-     * @return Number of subscribers that would receive events on this topic
+     * @brief Register a request handler (one per topic, no wildcards)
+     * @return true if registered, false if topic already has a handler
      */
+    virtual bool registerHandler(const QString& topic,
+                                 const QString& handlerId,
+                                 RequestHandler handler) = 0;
+
+    /**
+     * @brief Unregister a request handler
+     */
+    virtual bool unregisterHandler(const QString& topic) = 0;
+
+    /**
+     * @brief Unregister all request handlers for a plugin
+     */
+    virtual void unregisterAllHandlers(const QString& handlerId) = 0;
+
+    /**
+     * @brief Send a synchronous request, get a response
+     * @return Response data, or std::nullopt if no handler / error
+     */
+    virtual std::optional<QVariantMap> request(const QString& topic,
+                                               const QVariantMap& data = {},
+                                               const QString& senderId = {},
+                                               int timeoutMs = 0) = 0;
+
+    /**
+     * @brief Check if a handler exists for a topic
+     */
+    virtual bool hasHandler(const QString& topic) const = 0;
+
+    // ===== Query =====
+
     virtual int subscriberCount(const QString& topic) const = 0;
-
-    /**
-     * @brief Get all active subscription patterns
-     * @return List of patterns with active subscriptions
-     */
     virtual QStringList activeTopics() const = 0;
-
-    /**
-     * @brief Get statistics for a topic
-     * @param topic Topic name
-     * @return Topic statistics
-     */
     virtual TopicStats topicStats(const QString& topic) const = 0;
-
-    /**
-     * @brief Get all subscription IDs for a plugin
-     * @param subscriberId Plugin ID
-     * @return List of subscription IDs
-     */
     virtual QStringList subscriptionsFor(const QString& subscriberId) const = 0;
-
-    /**
-     * @brief Check if a topic matches a pattern
-     * @param topic Actual topic (e.g., "orders/created")
-     * @param pattern Pattern to match (e.g., "orders/*")
-     * @return true if topic matches the pattern
-     */
     virtual bool matchesTopic(const QString& topic, const QString& pattern) const = 0;
 
-    /**
-     * @brief API version for compatibility checking
-     */
-    static constexpr int apiVersion() { return 1; }
+    static constexpr int apiVersion() { return 3; }
 };
 
 } // namespace mpf

@@ -39,12 +39,23 @@ public:
      * @param providerId Plugin ID providing this service
      * @return true if registration succeeded
      */
+    /**
+     * @brief Register a service implementation
+     * @tparam T Interface type
+     * @param instance Service instance (must inherit QObject via multiple inheritance)
+     * @param version API version
+     * @param providerId Plugin ID providing this service
+     * @return true if registration succeeded
+     *
+     * Note: The implementation must inherit both QObject and interface T.
+     * Registration fails if dynamic_cast<QObject*> returns nullptr.
+     */
     template<typename T>
     bool add(T* instance, int version = 1, const QString& providerId = {})
     {
         QObject* obj = dynamic_cast<QObject*>(instance);
         if (!obj) {
-            obj = reinterpret_cast<QObject*>(instance);
+            return false;
         }
         return addService(typeid(T).name(), obj, version, providerId);
     }
